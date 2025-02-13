@@ -1,2 +1,2 @@
-# my-workflow-templates
-My workflow templates repository
+# gitops-workflow
+The repository of workflows
