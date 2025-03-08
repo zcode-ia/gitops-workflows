@@ -1,9 +1,8 @@
 # gitops-workflow
 The repository of workflows
 
-## Repository setup
-Run the follow command to setup the repository
+## Repository dependencies
+Please, install the following dependencies before setup this repository
 
-```
-./bootstrap.sh
-```
+* pre-commit
+* shellcheck-py
