@@ -40,8 +40,9 @@ jobs:
           NEW_PATH=$(direnv exec . bash -c 'echo $PATH')
           echo "PATH=$NEW_PATH" >> $GITHUB_ENV
 
-      # Step Run Pre-commit Hooks
+      # Step to run Pre-commit Hooks only to files which have changed
       - name: Run Pre-commit
         run: |
-          pre-commit install
-          pre-commit run --all-files
+          git fetch --depth=2 origin $(git rev-parse --abbrev-ref HEAD)
+          MODIFIED_FILES=$(git diff --name-only HEAD^ HEAD)
+          echo "$MODIFIED_FILES" | xargs pre-commit run --files
