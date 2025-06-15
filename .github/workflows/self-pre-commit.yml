@@ -1,0 +1,11 @@
+name: Pre-commit Hooks Check
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  pre-commit-check:
+    name: Run Pre-commit Hooks
+    uses: zcode-ia/gitops-workflows/.github/workflows/pre-commit.yml@main
