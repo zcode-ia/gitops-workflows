@@ -129,14 +129,9 @@ jobs:
                 # Capture the Terraform plan output
                 PLAN_OUTPUT=$(terraform -chdir=${PLAN_DIR} show -no-color plan.tfplan)
 
-                echo "Saving ${RESOURCE_DIR} infracost content..."
-                # Capture the Infracost breakdown output
-                INFRACOST_OUTPUT=$(infracost breakdown --path ${PLAN_DIR})
-
                 # Append the output to the aggregated variable
-                COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n#### Plan for ${RESOURCE_DIR}\n\n<pre>${PLAN_OUTPUT}<br><br>${INFRACOST_OUTPUT}</pre>\n"
+                COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n#### Plan for ${RESOURCE_DIR}\n\n<pre>${PLAN_OUTPUT}</pre>\n"
                 echo -e "\nPlan for ${RESOURCE_DIR}\n${PLAN_OUTPUT}\n\n" >> "${ARTIFACT_PATH_FILENAME}"
-                echo -e "${INFRACOST_OUTPUT}\n\n" >> "${ARTIFACT_PATH_FILENAME}"
               done
               COMMENT_OUTPUTS="${COMMENT_OUTPUTS}</details>"
               echo
