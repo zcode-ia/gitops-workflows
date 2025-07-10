@@ -1,0 +1,96 @@
+name: List PR Files
+
+on:
+  workflow_call:
+    inputs:
+      # Define the input parameters for the workflow
+      github_repository:
+        required: true
+        type: string
+        description: "The GitHub repository in the format 'owner/repo'"
+      github_event_pull_request_number:
+        required: true
+        type: number
+        description: "The pull request number to list modified files for"
+    secrets:
+      github_secret_token:
+        required: true
+        description: "The GitHub token to authenticate API requests"
+    outputs:
+      # Define the output parameters for the workflow
+      pr_files_count:
+        description: "The count of modified files in the pull request"
+        value: ${{ jobs.github_list_pr_files.outputs.pr_files_count }}
+      encoded_modified_files:
+        description: "The list of modified files in the pull request, encoded in base64"
+        value: ${{ jobs.github_list_pr_files.outputs.encoded_modified_files }}
+
+jobs:
+  github_list_pr_files:
+    name: main
+    runs-on: ubuntu-latest
+    steps:
+      # Step to checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: List Modified Files
+        id: list_modified_files
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_secret_token }}
+          GITHUB_REPOSITORY: ${{ inputs.github_repository }}
+          GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+        run: |
+          # File to store the modified files
+          API_RESPONSE_FILENAME=api_response.json
+          MODIFIED_FILES_FILENAME=modified_files.txt
+          > $MODIFIED_FILES_FILENAME
+
+          page=1
+          per_page=100
+
+          while :; do
+            # Use the GitHub API with pagination to fetch the list of modified files
+            STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$GITHUB_EVENT_PULL_REQUEST_NUMBER/files?per_page=$per_page&page=$page" \
+              -o $API_RESPONSE_FILENAME -w "%{http_code}")
+
+            if [[ "$STATUS_RESPONSE" =~ ^2 ]]; then
+              echo "Request succeeded with status: $STATUS_RESPONSE"
+            else
+              echo "Request failed with status: $STATUS_RESPONSE"
+              cat $API_RESPONSE_FILENAME
+              exit 1
+            fi
+
+            FILES_FOUND=$(cat "$API_RESPONSE_FILENAME" | jq -r '.[].filename')
+            if [ -z "$FILES_FOUND" ]; then
+              break
+            fi
+
+            # Show the modified files
+            echo "$FILES_FOUND" | tee -a $MODIFIED_FILES_FILENAME
+
+            # Check if less than per_page results returned (last page)
+            COUNT=$(echo "$FILES_FOUND" | wc -l)
+            if [ "$COUNT" -lt "$per_page" ]; then
+              break
+            fi
+            page=$((page+1))
+          done
+
+          # Check the filenames from the API response
+          if [ ! -s "$MODIFIED_FILES_FILENAME" ]; then
+            echo "- No filename found in the API response"
+            echo "pr_files_count=0" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Set the modified files as an environment variable and convert to base64 to avoid issues with special characters and newlines
+          ENCODED_MODIFIED_FILES=$(cat ${MODIFIED_FILES_FILENAME} | base64 -w 0)
+          echo "encoded_modified_files=${ENCODED_MODIFIED_FILES}" >> $GITHUB_OUTPUT
+          echo "pr_files_count=$(wc -l < ${MODIFIED_FILES_FILENAME})" >> $GITHUB_OUTPUT
+    outputs:
+      encoded_modified_files: ${{ steps.list_modified_files.outputs.encoded_modified_files }}
+      pr_files_count: ${{ steps.list_modified_files.outputs.pr_files_count }}

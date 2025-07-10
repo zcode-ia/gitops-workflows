@@ -1,0 +1,98 @@
+name: Filter working directory
+
+on:
+  workflow_call:
+    inputs:
+      # Define the input parameters for the workflow
+      working_directory_filter:
+        required: true
+        type: string
+        description: "The working directory filter to apply"
+      encoded_modified_files_to_filter:
+        required: true
+        type: string
+        description: "The base64 encoded list of modified files to filter"
+    outputs:
+      # Define the output parameters for the workflow
+      working_dirs_count:
+        description: "The number of modified files in the working directory"
+        value: ${{ jobs.terragrunt_filter_working_dir.outputs.working_dirs_count }}
+      encoded_working_dirs:
+        description: "The base64 encoded list filtered working directory"
+        value: ${{ jobs.terragrunt_filter_working_dir.outputs.encoded_working_dirs }}
+
+jobs:
+  terragrunt_filter_working_dir:
+    name: main
+    runs-on: ubuntu-latest
+    steps:
+      # Step to checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Filter Modified Files
+        id: filter_modified_files
+        env:
+          FILTER: ${{ inputs.working_directory_filter }}
+          ENCODED_MODIFIED_FILES_TO_FILTER: ${{ inputs.encoded_modified_files_to_filter }}
+        run: |
+          # Filter modified files by environment working directory
+
+          # File to store the filtered directories of modified files
+          FILTERED_WORKING_DIRS_FILENAME=filtered_working_dirs.txt
+
+          # Decode the base64 encoded MODIFIED_FILES and extract the parent folder
+          echo "${ENCODED_MODIFIED_FILES_TO_FILTER}" | base64 -d | grep "${FILTER}" | sed -E 's|/[^/]+/[^/]+$||' | sort -u | tee ${FILTERED_WORKING_DIRS_FILENAME}
+
+          # Check if the parent directory is empty
+          if [ ! -s ${FILTERED_WORKING_DIRS_FILENAME} ]; then
+            echo "No modified files found in the working directory."
+            FILTERED_WORKING_DIRS_COUNT=0
+            exit 0
+          fi
+
+          # Remove any directory that is a subdirectory of another in the list (keep only shallowest parents)
+          mapfile -t dirs < "${FILTERED_WORKING_DIRS_FILENAME}"
+
+          # Only keep paths that are NOT exactly 'live'
+          filtered_dirs=()
+          for dir in "${dirs[@]}"; do
+            [[ "$dir" == "live" ]] && continue
+            filtered_dirs+=("$dir")
+          done
+
+          unique_dirs=()
+          for dir in "${filtered_dirs[@]}"; do
+            skip=
+            for other in "${filtered_dirs[@]}"; do
+              if [[ "$dir" != "$other" && "$dir" == "$other/"* ]]; then
+                skip=1
+                break
+              fi
+            done
+            [[ -z "$skip" ]] && unique_dirs+=("$dir")
+          done
+
+          if [ "${#unique_dirs[@]}" -eq 0 ]; then
+            echo "No working directories found after filtering."
+            FILTERED_WORKING_DIRS_COUNT=0
+            exit 0
+          fi
+
+          echo "Final filtered working directories:"
+          for dir in "${unique_dirs[@]}"; do
+            echo "$dir"
+          done
+
+          # Count the working directories to be processed
+          FILTERED_WORKING_DIRS_COUNT=${#unique_dirs[@]}
+          echo "Found ${FILTERED_WORKING_DIRS_COUNT} directory(ies) to be processed in ${FILTER}."
+
+          # Set the working directories and convert to base64 to avoid issues with special characters and newlines
+          ENCODED_FILTERED_WORKING_DIRS=$(printf "%s\n" "${unique_dirs[@]}" | base64 -w 0)
+
+          echo "working_dirs_count=${FILTERED_WORKING_DIRS_COUNT}" >> $GITHUB_OUTPUT
+          echo "encoded_working_dirs=${ENCODED_FILTERED_WORKING_DIRS}" >> $GITHUB_OUTPUT
+    outputs:
+      working_dirs_count: ${{ steps.filter_modified_files.outputs.working_dirs_count }}
+      encoded_working_dirs: ${{ steps.filter_modified_files.outputs.encoded_working_dirs }}

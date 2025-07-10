@@ -1,0 +1,198 @@
+name: Terragrunt apply
+
+on:
+  workflow_call:
+    inputs:
+      # Define the input parameters for the workflow
+      encoded_working_dirs:
+        description: "Base64 encoded working directories"
+        required: true
+        type: string
+      github_workspace:
+        description: "GitHub workspace directory"
+        required: true
+        type: string
+      github_run_id:
+        description: "GitHub run ID"
+        required: true
+        type: string
+      github_event_pull_request_number:
+        description: "GitHub event pull request number"
+        required: true
+        type: number
+    outputs:
+      # Define the output parameters for the workflow
+      encoded_comment_title:
+        description: "The base64 encoded comment title"
+        value: ${{ jobs.terragrunt_apply.outputs.encoded_comment_title }}
+      encoded_comment_outputs:
+        description: "The base64 encoded comment outputs"
+        value: ${{ jobs.terragrunt_apply.outputs.encoded_comment_outputs }}
+      comment_status:
+        description: "The status of the comment"
+        value: ${{ jobs.terragrunt_apply.outputs.comment_status }}
+      artifact_id:
+        description: "The ID of the uploaded artifact"
+        value: ${{ jobs.terragrunt_apply.outputs.artifact_id }}
+      artifact_url:
+        description: "The URL of the uploaded artifact"
+        value: ${{ jobs.terragrunt_apply.outputs.artifact_url }}
+      main_outcome:
+        description: "The status of the Terragrunt apply job"
+        value: ${{ jobs.terragrunt_apply.outputs.main_outcome }}
+
+jobs:
+  terragrunt_apply:
+    name: main
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:latest
+        ports:
+          - 4566:4566
+
+    steps:
+      # Caching Terraform and Terragrunt dependencies
+      - name: Cache Terragrunt
+        uses: actions/cache@v4
+        with:
+          path: ~/.terragrunt
+          key: ${{ runner.os }}-terragrunt-${{ hashFiles('**/terragrunt.hcl') }}
+
+      # Step to checkout the code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          # Install necessary dependencies
+
+          sudo apt-get update
+          sudo apt-get install -y unzip direnv
+
+      - name: Setup Repository
+        run: |
+          # Set up the repository
+
+          SKIP=enable_pre_commit ./bootstrap.sh # this script should be present in the caller repository
+
+          # Extract the updated PATH and write it to GITHUB_ENV
+          NEW_PATH=$(direnv exec . bash -c 'echo $PATH')
+          echo "PATH=$NEW_PATH" >> $GITHUB_ENV
+
+      - name: Terragrunt Apply
+        id: main
+        env:
+          ENCODED_WORKING_DIRS: ${{ inputs.encoded_working_dirs }}
+          GITHUB_WORKSPACE: ${{ inputs.github_workspace }}
+          GITHUB_RUN_ID: ${{ inputs.github_run_id }}
+          GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+        run: |
+          # Run Terragrunt apply
+
+          # File to store the output
+          TERRAGRUNT_RUNALL_OUTPUT_FILENAME=terragrunt_runall_output.txt
+          ARTIFACT_PATH_FILENAME="${GITHUB_WORKSPACE}/${GITHUB_EVENT_PULL_REQUEST_NUMBER}-${GITHUB_RUN_ID}-output.txt"
+
+          # Initialize variables to store title and all apply outputs
+          COMMENT_TITLE="## Apply result\n\n"
+          COMMENT_OUTPUTS="Show apply for the following directories:\n\n"
+
+          # Decode the base64 encoded working directories
+          for WORKING_DIR in $(echo "${ENCODED_WORKING_DIRS}" | base64 -d); do
+            # Check if the working directory exists
+            if [ -d "${WORKING_DIR}" ]; then
+              # Adding the directory name to the output
+              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}<details><summary>${WORKING_DIR}</summary>\n"
+
+              # Run Terragrunt init in the directory
+              terragrunt run-all init --non-interactive --no-color --working-dir "${WORKING_DIR}"
+
+              # Run Terragrunt apply in the directory
+              terragrunt run-all apply --non-interactive --no-color --working-dir "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
+
+              echo >> "${ARTIFACT_PATH_FILENAME}"
+              # Extract the apply header from the output
+              cat "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}" | sed -E 's/^.*(The stack at .*)/\1/' | sed -E 's/^.*\[(.*)\].*terraform:\s?/\[\1\] : /' >> "${ARTIFACT_PATH_FILENAME}"
+
+              APPLY_OUTPUT=$(cat "${ARTIFACT_PATH_FILENAME}")
+              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n<pre>${APPLY_OUTPUT}</pre>\n</details>"
+              echo
+            else
+              echo "Directory ${WORKING_DIR} does not exist."
+            fi
+          done
+
+          if [ ! -f ${TERRAGRUNT_RUNALL_OUTPUT_FILENAME} ]; then
+            # Set variables to warning no plan was generated
+            COMMENT_TITLE="## Apply result\n\n"
+            COMMENT_OUTPUTS="No apply was performed. Check pipeline logs for more details.\n\n"
+            echo "comment_status=pass" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Convert to base64 to avoid issues with special characters and newlines
+          ENCODED_COMMENT_TITLE=$(echo -e "$COMMENT_TITLE" | jq -Rsa . | base64 -w 0)
+          echo "encoded_comment_title=${ENCODED_COMMENT_TITLE}" >> $GITHUB_OUTPUT
+
+          if [[ ${#COMMENT_OUTPUTS} -gt 65536 ]]; then
+            echo "Comment output exceeds 65536 characters, the artifact file will be uploaded..."
+            # Grouping the prefix and ordering the output file
+             awk '
+              /^\[[^]]+\]/ {
+                prefix = substr($0, 1, index($0, "]"))
+                gsub(/^[[:space:]]+|[[:space:]]+$/, "", prefix)
+                if (!(prefix in seen)) {
+                  seen[prefix] = 1
+                  order[++count] = prefix
+                }
+                data[prefix] = data[prefix] $0 "\n"
+              }
+              END {
+                for (i = 1; i <= count; i++) {
+                  pf = order[i]
+                  print "### " pf
+                  printf "%s", data[pf]
+                  print ""
+                }
+              }
+            ' "${ARTIFACT_PATH_FILENAME}" > "${ARTIFACT_PATH_FILENAME}.ordered"
+            cp -f "${ARTIFACT_PATH_FILENAME}.ordered" "${ARTIFACT_PATH_FILENAME}"
+            echo "artifact_path_filename=${ARTIFACT_PATH_FILENAME}" >> $GITHUB_OUTPUT
+            COMMENT_OUTPUTS="Content too long for github comments."
+            ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
+            echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
+            echo "comment_status=fallback" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Escape the content of COMMENT_OUTPUTS for JSON and convert to base64 to avoid issues with special characters and newlines
+          ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
+          echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
+
+          echo "comment_status=pass" >> $GITHUB_OUTPUT
+
+          # Search for Error message in the output file
+          if grep -q "STDERR" "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"; then
+            echo "Error found in the output, failing the job..."
+            exit 1
+          fi
+        # to ensure comment postage even if this step fails
+        continue-on-error: true
+
+      - name: Upload Comment Contents
+        id: upload_comment
+        if: steps.main.outputs.comment_status == 'fallback'
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ steps.main.outputs.artifact_path_filename }}
+          retention-days: 5
+          overwrite: true
+
+    outputs:
+      encoded_comment_title: ${{ steps.main.outputs.encoded_comment_title }}
+      encoded_comment_outputs: ${{ steps.main.outputs.encoded_comment_outputs }}
+      comment_status: ${{ steps.main.outputs.comment_status }}
+      artifact_id: ${{ steps.upload_comment.outputs.artifact-id }}
+      artifact_url: ${{ steps.upload_comment.outputs.artifact-url }}
+      main_outcome: ${{ steps.main.outcome }}
