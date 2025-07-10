@@ -20,11 +20,6 @@ on:
         description: "GitHub event pull request number"
         required: true
         type: number
-    secrets:
-      # Define the secrets required for the workflow
-      infracost_api_key:
-        description: "Infracost API key"
-        required: true
     outputs:
       # Define the output parameters for the workflow
       encoded_comment_title:
@@ -92,7 +87,6 @@ jobs:
           GITHUB_WORKSPACE: ${{ inputs.github_workspace }}
           GITHUB_RUN_ID: ${{ inputs.github_run_id }}
           GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
-          INFRACOST_API_KEY: ${{ secrets.infracost_api_key }}
         run: |
           # Generate a Terragrunt plan
 
