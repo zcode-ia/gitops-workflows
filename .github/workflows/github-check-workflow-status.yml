@@ -1,0 +1,32 @@
+name: Check Workflow Status
+
+on:
+  workflow_call:
+    inputs:
+      # Define the input parameters for the workflow
+      main_outcome:
+        description: 'The outcome of the main job'
+        type: string
+        default: 'success'
+
+jobs:
+  check_workflow_status:
+    name: main
+    runs-on: ubuntu-latest
+    steps:
+      # Step to checkout the code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Workflow Status
+        env:
+          STEP_MAIN_OUTCOME: ${{ inputs.main_outcome }}
+        run: |
+          # Check the workflow status
+
+          if [[ "${STEP_MAIN_OUTCOME}" == "failure" ]]; then
+            echo "The workflow failed. Please check the logs for details."
+            exit 1
+          else
+            echo "The workflow completed successfully."
+          fi

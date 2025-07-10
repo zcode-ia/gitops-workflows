@@ -1,0 +1,205 @@
+name: Terragrunt plan
+
+on:
+  workflow_call:
+    inputs:
+      # Define the input parameters for the workflow
+      encoded_working_dirs:
+        description: "Base64 encoded working directories"
+        required: true
+        type: string
+      github_workspace:
+        description: "GitHub workspace directory"
+        required: true
+        type: string
+      github_run_id:
+        description: "GitHub run ID"
+        required: true
+        type: string
+      github_event_pull_request_number:
+        description: "GitHub event pull request number"
+        required: true
+        type: number
+    secrets:
+      # Define the secrets required for the workflow
+      infracost_api_key:
+        description: "Infracost API key"
+        required: true
+    outputs:
+      # Define the output parameters for the workflow
+      encoded_comment_title:
+        description: "The base64 encoded comment title"
+        value: ${{ jobs.terragrunt_plan.outputs.encoded_comment_title }}
+      encoded_comment_outputs:
+        description: "The base64 encoded comment outputs"
+        value: ${{ jobs.terragrunt_plan.outputs.encoded_comment_outputs }}
+      comment_status:
+        description: "The status of the comment"
+        value: ${{ jobs.terragrunt_plan.outputs.comment_status }}
+      artifact_id:
+        description: "The ID of the uploaded artifact"
+        value: ${{ jobs.terragrunt_plan.outputs.artifact_id }}
+      artifact_url:
+        description: "The URL of the uploaded artifact"
+        value: ${{ jobs.terragrunt_plan.outputs.artifact_url }}
+      main_outcome:
+        description: "The status of the Terragrunt plan job"
+        value: ${{ jobs.terragrunt_plan.outputs.main_outcome }}
+
+jobs:
+  terragrunt_plan:
+    name: main
+    runs-on: ubuntu-latest
+    services:
+      localstack:
+        image: localstack/localstack:latest
+        ports:
+          - 4566:4566
+
+    steps:
+      # Caching Terraform and Terragrunt dependencies
+      - name: Cache Terragrunt
+        uses: actions/cache@v4
+        with:
+          path: ~/.terragrunt
+          key: ${{ runner.os }}-terragrunt-${{ hashFiles('**/terragrunt.hcl') }}
+
+      # Step to checkout the code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          # Install necessary dependencies
+
+          sudo apt-get update
+          sudo apt-get install -y unzip direnv
+
+      - name: Setup Repository
+        run: |
+          # Set up the repository
+
+          SKIP=enable_pre_commit ./bootstrap.sh # this script should be present in the caller repository
+
+          # Extract the updated PATH and write it to GITHUB_ENV
+          NEW_PATH=$(direnv exec . bash -c 'echo $PATH')
+          echo "PATH=$NEW_PATH" >> $GITHUB_ENV
+
+      - name: Terragrunt Plan
+        id: main
+        env:
+          ENCODED_WORKING_DIRS: ${{ inputs.encoded_working_dirs }}
+          GITHUB_WORKSPACE: ${{ inputs.github_workspace }}
+          GITHUB_RUN_ID: ${{ inputs.github_run_id }}
+          GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+          INFRACOST_API_KEY: ${{ secrets.infracost_api_key }}
+        run: |
+          # Generate a Terragrunt plan
+
+          # File to store the output
+          TERRAGRUNT_RUNALL_OUTPUT_FILENAME=terragrunt_runall_output.txt
+          ARTIFACT_PATH_FILENAME="${GITHUB_WORKSPACE}/${GITHUB_EVENT_PULL_REQUEST_NUMBER}-${GITHUB_RUN_ID}-output.txt"
+
+          # Initialize variables to store title and all plan outputs
+          COMMENT_TITLE="## Plan result\n\n"
+          COMMENT_OUTPUTS="Show plan for the following directories:\n\n"
+
+          # Decode the base64 encoded working directories
+          for WORKING_DIR in $(echo "${ENCODED_WORKING_DIRS}" | base64 -d); do
+            # Check if the working directory exists
+            if [ -d "${WORKING_DIR}" ]; then
+              # Adding the directory name to the output
+              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}<details><summary>${WORKING_DIR}</summary>\n"
+
+              echo "Planning ${WORKING_DIR}..." >> "${ARTIFACT_PATH_FILENAME}"
+
+              # Run Terragrunt init in the directory
+              terragrunt run-all init --non-interactive --no-color --working-dir "${WORKING_DIR}"
+
+              # Run Terragrunt plan in the directory
+              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color --working-dir "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
+
+              # Extract the plan header from the output
+              PLAN_HEADER=$(awk '/The stack at/ {flag=1; print substr($0, index($0, "The stack at")); next} /Terraform used the selected providers to generate/ {flag=0} flag' "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}")
+
+              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n<pre>${PLAN_HEADER}</pre>\n"
+              echo >> "${ARTIFACT_PATH_FILENAME}"
+              echo -e "${PLAN_HEADER}\n\n" >> "${ARTIFACT_PATH_FILENAME}"
+
+              # List all plan files, ordering by creation time
+              for PLAN_DIR in $(find ${WORKING_DIR} -name plan.tfplan -printf '%T@ %h\n' | sort -n | cut -d' ' -f2-); do
+                RESOURCE_DIR=$(echo "${PLAN_DIR}" | sed -E "s|^${WORKING_DIR}/||; s|/\.terragrunt-cache.*||")
+
+                echo "Saving ${RESOURCE_DIR} plan content..."
+
+                # Capture the Terraform plan output
+                PLAN_OUTPUT=$(terraform -chdir=${PLAN_DIR} show -no-color plan.tfplan)
+
+                echo "Saving ${RESOURCE_DIR} infracost content..."
+                # Capture the Infracost breakdown output
+                INFRACOST_OUTPUT=$(infracost breakdown --path ${PLAN_DIR})
+
+                # Append the output to the aggregated variable
+                COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n#### Plan for ${RESOURCE_DIR}\n\n<pre>${PLAN_OUTPUT}<br><br>${INFRACOST_OUTPUT}</pre>\n"
+                echo -e "\nPlan for ${RESOURCE_DIR}\n${PLAN_OUTPUT}\n\n" >> "${ARTIFACT_PATH_FILENAME}"
+                echo -e "${INFRACOST_OUTPUT}\n\n" >> "${ARTIFACT_PATH_FILENAME}"
+              done
+              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}</details>"
+              echo
+            else
+              echo "Directory ${WORKING_DIR} does not exist."
+            fi
+          done
+
+          if [ ! -f ${TERRAGRUNT_RUNALL_OUTPUT_FILENAME} ]; then
+            # Set variables to warning no plan was generated
+            COMMENT_TITLE="## Plan result\n\n"
+            COMMENT_OUTPUTS="No plan was generated. Check pipeline logs for more details.\n\n"
+            echo "comment_status=pass" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Convert to base64 to avoid issues with special characters and newlines
+          ENCODED_COMMENT_TITLE=$(echo -e "$COMMENT_TITLE" | jq -Rsa .| base64 -w 0)
+          echo "encoded_comment_title=${ENCODED_COMMENT_TITLE}" >> $GITHUB_OUTPUT
+
+          if [[ ${#COMMENT_OUTPUTS} -gt 65536 ]]; then
+            echo "Comment output exceeds 65536 characters, uploading artifact..."
+            echo "artifact_path_filename=${ARTIFACT_PATH_FILENAME}" >> $GITHUB_OUTPUT
+            COMMENT_OUTPUTS="Content too long for github comments."
+            ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
+            echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
+            echo "comment_status=fallback" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Escape the content of COMMENT_OUTPUTS for JSON and convert to base64 to avoid issues with special characters and newlines
+          ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
+          echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
+
+          echo "comment_status=pass" >> $GITHUB_OUTPUT
+
+          # Search for Error message in the output file
+          if grep -q "STDERR" "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"; then
+            echo "Error found in the output, failing the job..."
+            exit 1
+          fi
+        # to ensure comment postage even if this step fails
+        continue-on-error: true
+
+      - name: Upload Comment Contents
+        id: upload_comment
+        if: steps.main.outputs.comment_status == 'fallback'
+        uses: actions/upload-artifact@v4
+        with:
+          path: ${{ steps.main.outputs.artifact_path_filename }}
+          retention-days: 5
+          overwrite: true
+
+    outputs:
+      encoded_comment_title: ${{ steps.main.outputs.encoded_comment_title }}
+      encoded_comment_outputs: ${{ steps.main.outputs.encoded_comment_outputs }}
+      comment_status: ${{ steps.main.outputs.comment_status }}
+      artifact_id: ${{ steps.upload_comment.outputs.artifact-id }}
+      artifact_url: ${{ steps.upload_comment.outputs.artifact-url }}
+      main_outcome: ${{ steps.main.outcome }}
