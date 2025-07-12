@@ -2,6 +2,17 @@ name: Pre-commit Hooks Check
 
 on:
   workflow_call:
+    inputs:
+      # Define the input parameters for the workflow
+      encoded_modified_files:
+        required: true
+        type: string
+        description: "The base64 encoded list of modified files to check"
+    outputs:
+      # Define the output parameters for the workflow
+      main_outcome:
+        description: "The status of the Pre-commit job"
+        value: ${{ jobs.pre-commit-check.outputs.main_outcome }}
 
 jobs:
   pre-commit-check:
@@ -13,9 +24,9 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # Step to install necessary dependencies
       - name: Install dependencies
         run: |
+          # Install necessary dependencies
           sudo apt-get update
           sudo apt-get install -y unzip direnv
 
@@ -25,44 +36,38 @@ jobs:
         with:
           python-version: "3.13"
 
-      # Step to install Pre-commit and other dependencies
       - name: Install Pre-commit
         run: |
+          # Install Pre-commit and other dependencies
           python -m pip install --upgrade pip
           pip install pre-commit shellcheck-py
 
-      # Step to setup the repository
       - name: Setup Repository
         run: |
+          # Setup the repository
           ./bootstrap.sh # this script should be present in the caller repository and should run pre-commit install
 
           # Extract the updated PATH and write it to GITHUB_ENV
           NEW_PATH=$(direnv exec . bash -c 'echo $PATH')
           echo "PATH=$NEW_PATH" >> $GITHUB_ENV
 
-      # Step to fetch modified files from the pull request
-      - name: List Modified Files
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # File to store the modified files
-          MODIFIED_FILES_NAME=modified_files.txt
-
-          # Use the GitHub API to fetch the list of modified files
-          API_RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            https://api.github.com/repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/files)
-
-          # Check if the API response is valid JSON
-          echo "$API_RESPONSE" | jq empty || { echo "Invalid API response: $API_RESPONSE"; exit 1; }
-
-          # Extract the filenames from the API response
-          echo "$API_RESPONSE" | jq -r '.[].filename' | tee "${MODIFIED_FILES_NAME}" || exit 1
-
-          echo "MODIFIED_FILES_NAME=${MODIFIED_FILES_NAME}" >> $GITHUB_ENV
+      # Step to cache pre-commit environments
+      - name: Cache pre-commit envs
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-
 
       # Step to run Pre-commit Hooks only to files which have changed
       - name: Run Pre-commit
+        id: main
+        env:
+          ENCODED_MODIFIED_FILES: ${{ inputs.encoded_modified_files }}
         run: |
           # Run pre-commit only on modified files
-          cat "$MODIFIED_FILES_NAME" | xargs pre-commit run --files
+          echo "$ENCODED_MODIFIED_FILES" | base64 -d | xargs pre-commit run --files
+
+    outputs:
+      main_outcome: ${{ steps.main.outcome }}
