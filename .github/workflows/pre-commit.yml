@@ -3,13 +3,13 @@ name: Pre-commit Hooks Check
 on:
   workflow_call:
     inputs:
-      # Define the input parameters for the workflow
+      # Define the input parameters for the workflow.
       encoded_modified_files:
         required: true
         type: string
         description: "The base64 encoded list of modified files to check"
     outputs:
-      # Define the output parameters for the workflow
+      # Define the output parameters for the workflow.
       main_outcome:
         description: "The status of the Pre-commit job"
         value: ${{ jobs.pre-commit-check.outputs.main_outcome }}
