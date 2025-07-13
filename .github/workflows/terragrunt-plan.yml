@@ -20,6 +20,11 @@ on:
         description: "GitHub event pull request number"
         required: true
         type: number
+    secrets:
+      # Define the secrets required for the workflow
+      infracost_api_key:
+        description: "Infracost API key"
+        required: true
     outputs:
       # Define the output parameters for the workflow
       encoded_comment_title:
@@ -87,6 +92,7 @@ jobs:
           GITHUB_WORKSPACE: ${{ inputs.github_workspace }}
           GITHUB_RUN_ID: ${{ inputs.github_run_id }}
           GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+          INFRACOST_API_KEY: ${{ secrets.infracost_api_key }}
         run: |
           # Generate a Terragrunt plan
 
@@ -129,9 +135,14 @@ jobs:
                 # Capture the Terraform plan output
                 PLAN_OUTPUT=$(terraform -chdir=${PLAN_DIR} show -no-color plan.tfplan)
 
+                echo "Saving ${RESOURCE_DIR} infracost content..."
+                # Capture the Infracost breakdown output
+                INFRACOST_OUTPUT=$(infracost breakdown --path ${PLAN_DIR})
+
                 # Append the output to the aggregated variable
-                COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n#### Plan for ${RESOURCE_DIR}\n\n<pre>${PLAN_OUTPUT}</pre>\n"
+                COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n#### Plan for ${RESOURCE_DIR}\n\n<pre>${PLAN_OUTPUT}<br><br>${INFRACOST_OUTPUT}</pre>\n"
                 echo -e "\nPlan for ${RESOURCE_DIR}\n${PLAN_OUTPUT}\n\n" >> "${ARTIFACT_PATH_FILENAME}"
+                echo -e "${INFRACOST_OUTPUT}\n\n" >> "${ARTIFACT_PATH_FILENAME}"
               done
               COMMENT_OUTPUTS="${COMMENT_OUTPUTS}</details>"
               echo
