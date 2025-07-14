@@ -54,10 +54,10 @@ jobs:
           # Remove any directory that is a subdirectory of another in the list (keep only shallowest parents)
           mapfile -t dirs < "${FILTERED_WORKING_DIRS_FILENAME}"
 
-          # Only keep paths that are NOT exactly 'live'
+          # Only keep paths that are NOT exactly 'live' or match the FILTER
           filtered_dirs=()
           for dir in "${dirs[@]}"; do
-            [[ "$dir" == "live" ]] && continue
+            [[ "$dir" == "live" || "$dir" == "${FILTER}" ]] && continue
             filtered_dirs+=("$dir")
           done
 
