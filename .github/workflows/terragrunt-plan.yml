@@ -57,16 +57,16 @@ jobs:
           - 4566:4566
 
     steps:
+      # Step to checkout the code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
       # Caching Terraform and Terragrunt dependencies
       - name: Cache Terragrunt
         uses: actions/cache@v4
         with:
-          path: ~/.terragrunt
-          key: ${{ runner.os }}-terragrunt-${{ hashFiles('**/terragrunt.hcl') }}
-
-      # Step to checkout the code
-      - name: Checkout Code
-        uses: actions/checkout@v4
+          path: ~/.cache/terragrunt/providers
+          key: provider-cache-${{ runner.os }}-${{ hashFiles('**/aws.hcl') }}
 
       - name: Install Dependencies
         run: |
@@ -114,10 +114,10 @@ jobs:
               echo "Planning ${WORKING_DIR}..." >> "${ARTIFACT_PATH_FILENAME}"
 
               # Run Terragrunt init in the directory
-              terragrunt run-all init --non-interactive --no-color --working-dir "${WORKING_DIR}"
+              terragrunt run-all init --non-interactive --no-color --working-dir --provider-cache "${WORKING_DIR}"
 
               # Run Terragrunt plan in the directory
-              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color --working-dir "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
+              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color --working-dir --provider-cache "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
 
               # Extract the plan header from the output
               PLAN_HEADER=$(awk '/The stack at/ {flag=1; print substr($0, index($0, "The stack at")); next} /Terraform used the selected providers to generate/ {flag=0} flag' "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}")
