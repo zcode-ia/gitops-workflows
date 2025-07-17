@@ -114,10 +114,10 @@ jobs:
               echo "Planning ${WORKING_DIR}..." >> "${ARTIFACT_PATH_FILENAME}"
 
               # Run Terragrunt init in the directory
-              terragrunt run-all init --non-interactive --no-color --working-dir --provider-cache "${WORKING_DIR}"
+              terragrunt run-all init --non-interactive --no-color  --provider-cache --working-dir "${WORKING_DIR}"
 
               # Run Terragrunt plan in the directory
-              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color --working-dir --provider-cache "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
+              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color  --provider-cache --working-dir "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
 
               # Extract the plan header from the output
               PLAN_HEADER=$(awk '/The stack at/ {flag=1; print substr($0, index($0, "The stack at")); next} /Terraform used the selected providers to generate/ {flag=0} flag' "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}")
