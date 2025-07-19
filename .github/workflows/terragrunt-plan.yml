@@ -21,6 +21,9 @@ on:
         required: true
         type: number
     secrets:
+      github_secret_token:
+        required: true
+        description: "The GitHub token to call modules from other repositories"
       # Define the secrets required for the workflow
       infracost_api_key:
         description: "Infracost API key"
@@ -92,12 +95,17 @@ jobs:
           INPUT_GITHUB_REPOSITORY: ${{ inputs.github_repository }}
           INPUT_GITHUB_RUN_ID: ${{ inputs.github_run_id }}
           INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+          INPUT_GITHUB_TOKEN: ${{ secrets.github_secret_token }}
           INFRACOST_API_KEY: ${{ secrets.infracost_api_key }}
         run: |
           # Generate a Terragrunt plan
 
           # URL for the GitHub run ID
           RUN_ID_URL="https://github.com/${INPUT_GITHUB_REPOSITORY}/actions/runs/${INPUT_GITHUB_RUN_ID}"
+
+          # Ensure that the GITHUB_TOKEN is set for git operations
+          AUTH_URL="https://x-access-token:${INPUT_GITHUB_TOKEN}@github.com/"
+          git config --global url."${AUTH_URL}".insteadOf https://github.com/
 
           # File to store the output
           TERRAGRUNT_RUNALL_OUTPUT_FILENAME=terragrunt_runall_output.txt
