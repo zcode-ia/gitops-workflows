@@ -26,15 +26,15 @@ jobs:
       - name: Set Environment
         id: set_env
         env:
-          GITHUB_BASE_REF: ${{ inputs.github_base_ref }}
+          INPUT_GITHUB_BASE_REF: ${{ inputs.github_base_ref }}
         run: |
           # Determine the environment settings
 
           # Set the working directory based on the base branch
-          if [[ "$GITHUB_BASE_REF" == "main" ]]; then
+          if [[ "$INPUT_GITHUB_BASE_REF" == "main" ]]; then
             WORKING_DIR=live/prod
           else
-            WORKING_DIR=live/$GITHUB_BASE_REF
+            WORKING_DIR=live/$INPUT_GITHUB_BASE_REF
           fi
           echo "${WORKING_DIR}"
           echo "working_dir=${WORKING_DIR}" >> $GITHUB_OUTPUT
