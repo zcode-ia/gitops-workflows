@@ -110,10 +110,10 @@ jobs:
               COMMENT_OUTPUTS="${COMMENT_OUTPUTS}<details><summary>${WORKING_DIR}</summary>\n"
 
               # Run Terragrunt init in the directory
-              terragrunt run-all init --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}" --provider-cache
+              terragrunt run-all init --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}"
 
               # Run Terragrunt apply in the directory
-              terragrunt run-all apply --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}" --provider-cache 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
+              terragrunt run-all apply --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
 
               echo >> "${ARTIFACT_PATH_FILENAME}"
               # Extract the apply header from the output
