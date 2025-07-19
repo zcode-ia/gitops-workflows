@@ -37,30 +37,30 @@ jobs:
       - name: List Modified Files
         id: list_modified_files
         env:
-          GITHUB_TOKEN: ${{ secrets.github_secret_token }}
-          GITHUB_REPOSITORY: ${{ inputs.github_repository }}
-          GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+          INPUT_GITHUB_TOKEN: ${{ secrets.github_secret_token }}
+          INPUT_GITHUB_REPOSITORY: ${{ inputs.github_repository }}
+          INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
         run: |
           # File to store the modified files
           API_RESPONSE_FILENAME=api_response.json
           MODIFIED_FILES_FILENAME=modified_files.txt
-          > $MODIFIED_FILES_FILENAME
+          > "${MODIFIED_FILES_FILENAME}"
 
           page=1
           per_page=100
 
           while :; do
             # Use the GitHub API with pagination to fetch the list of modified files
-            STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer $GITHUB_TOKEN" \
+            STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer ${INPUT_GITHUB_TOKEN}" \
               -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$GITHUB_EVENT_PULL_REQUEST_NUMBER/files?per_page=$per_page&page=$page" \
-              -o $API_RESPONSE_FILENAME -w "%{http_code}")
+              "https://api.github.com/repos/${INPUT_GITHUB_REPOSITORY}/pulls/${INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER}/files?per_page=$per_page&page=$page" \
+              -o ${API_RESPONSE_FILENAME} -w "%{http_code}")
 
             if [[ "$STATUS_RESPONSE" =~ ^2 ]]; then
               echo "Request succeeded with status: $STATUS_RESPONSE"
             else
               echo "Request failed with status: $STATUS_RESPONSE"
-              cat $API_RESPONSE_FILENAME
+              cat "$API_RESPONSE_FILENAME"
               exit 1
             fi
 

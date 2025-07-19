@@ -8,8 +8,8 @@ on:
         description: "Base64 encoded working directories"
         required: true
         type: string
-      github_workspace:
-        description: "GitHub workspace directory"
+      github_repository:
+        description: "The GitHub repository in the format 'owner/repo'"
         required: true
         type: string
       github_run_id:
@@ -89,20 +89,24 @@ jobs:
         id: main
         env:
           ENCODED_WORKING_DIRS: ${{ inputs.encoded_working_dirs }}
-          GITHUB_WORKSPACE: ${{ inputs.github_workspace }}
-          GITHUB_RUN_ID: ${{ inputs.github_run_id }}
-          GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+          INPUT_GITHUB_REPOSITORY: ${{ inputs.github_repository }}
+          INPUT_GITHUB_RUN_ID: ${{ inputs.github_run_id }}
+          INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
           INFRACOST_API_KEY: ${{ secrets.infracost_api_key }}
         run: |
           # Generate a Terragrunt plan
 
+          # URL for the GitHub run ID
+          RUN_ID_URL="https://github.com/${INPUT_GITHUB_REPOSITORY}/actions/runs/${INPUT_GITHUB_RUN_ID}"
+
           # File to store the output
           TERRAGRUNT_RUNALL_OUTPUT_FILENAME=terragrunt_runall_output.txt
-          ARTIFACT_PATH_FILENAME="${GITHUB_WORKSPACE}/${GITHUB_EVENT_PULL_REQUEST_NUMBER}-${GITHUB_RUN_ID}-output.txt"
+          ARTIFACT_PATH_FILENAME="${GITHUB_WORKSPACE}/${INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER}-${INPUT_GITHUB_RUN_ID}-output.txt"
 
           # Initialize variables to store title and all plan outputs
           COMMENT_TITLE="## Plan result\n\n"
           COMMENT_OUTPUTS="Show plan for the following directories:\n\n"
+          COMMENT_OUTPUTS_MAX_LENGTH=65000
 
           # Decode the base64 encoded working directories
           for WORKING_DIR in $(echo "${ENCODED_WORKING_DIRS}" | base64 -d); do
@@ -114,10 +118,10 @@ jobs:
               echo "Planning ${WORKING_DIR}..." >> "${ARTIFACT_PATH_FILENAME}"
 
               # Run Terragrunt init in the directory
-              terragrunt run-all init --non-interactive --no-color  --provider-cache --working-dir "${WORKING_DIR}"
+              terragrunt run-all init --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}" --provider-cache
 
               # Run Terragrunt plan in the directory
-              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color  --provider-cache --working-dir "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
+              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}" --provider-cache 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
 
               # Extract the plan header from the output
               PLAN_HEADER=$(awk '/The stack at/ {flag=1; print substr($0, index($0, "The stack at")); next} /Terraform used the selected providers to generate/ {flag=0} flag' "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}")
@@ -154,17 +158,17 @@ jobs:
           if [ ! -f ${TERRAGRUNT_RUNALL_OUTPUT_FILENAME} ]; then
             # Set variables to warning no plan was generated
             COMMENT_TITLE="## Plan result\n\n"
-            COMMENT_OUTPUTS="No plan was generated. Check pipeline logs for more details.\n\n"
+            COMMENT_OUTPUTS="No plan was generated. Check pipeline logs for more details. [${INPUT_GITHUB_RUN_ID}](${RUN_ID_URL})\n\n"
             echo "comment_status=pass" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           # Convert to base64 to avoid issues with special characters and newlines
-          ENCODED_COMMENT_TITLE=$(echo -e "$COMMENT_TITLE" | jq -Rsa .| base64 -w 0)
+          ENCODED_COMMENT_TITLE=$(echo -e "$COMMENT_TITLE" | jq -Rsa . | base64 -w 0)
           echo "encoded_comment_title=${ENCODED_COMMENT_TITLE}" >> $GITHUB_OUTPUT
 
-          if [[ ${#COMMENT_OUTPUTS} -gt 65536 ]]; then
-            echo "Comment output exceeds 65536 characters, uploading artifact..."
+          if [[ ${#COMMENT_OUTPUTS} -gt ${COMMENT_OUTPUTS_MAX_LENGTH} ]]; then
+            echo "Comment output exceeds ${COMMENT_OUTPUTS_MAX_LENGTH} characters, uploading artifact..."
             echo "artifact_path_filename=${ARTIFACT_PATH_FILENAME}" >> $GITHUB_OUTPUT
             COMMENT_OUTPUTS="Content too long for github comments."
             ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
@@ -181,6 +185,10 @@ jobs:
 
           # Search for Error message in the output file
           if grep -q "STDERR" "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"; then
+            COMMENT_OUTPUTS="The pipeline has failed! Check the logs for more details. [${INPUT_GITHUB_RUN_ID}](${RUN_ID_URL})\n\n"
+            ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
+            echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
+            echo "comment_status=fallback" >> $GITHUB_OUTPUT
             echo "Error found in the output, failing the job..."
             exit 1
           fi

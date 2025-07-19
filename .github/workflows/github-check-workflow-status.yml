@@ -24,9 +24,9 @@ jobs:
         run: |
           # Check the workflow status
 
-          if [[ "${STEP_MAIN_OUTCOME}" == "failure" ]]; then
+          if [[ "${STEP_MAIN_OUTCOME}" == "success" ]]; then
+            echo "The workflow completed successfully."
+          else
             echo "The workflow failed. Please check the logs for details."
             exit 1
-          else
-            echo "The workflow completed successfully."
           fi
