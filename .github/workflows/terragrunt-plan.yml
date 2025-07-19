@@ -197,7 +197,7 @@ jobs:
 
       - name: Upload Comment Contents
         id: upload_comment
-        if: steps.main.outputs.comment_status == 'fallback'
+        if: steps.main.outcome == 'success' && steps.main.outputs.comment_status == 'fallback'
         uses: actions/upload-artifact@v4
         with:
           path: ${{ steps.main.outputs.artifact_path_filename }}
