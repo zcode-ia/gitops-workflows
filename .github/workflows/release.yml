@@ -1,0 +1,32 @@
+name: Release
+
+on:
+  workflow_call:
+    secrets:
+      github_secret_token:
+        required: true
+        description: "The GitHub token to authenticate API requests"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Step to check out the code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step to set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Step to install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Step to run semantic-release
+      - name: Run semantic-release
+        run: npx semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.github_secret_token }}
