@@ -2,18 +2,40 @@ name: Release
 
 on:
   workflow_call:
-    secrets:
-      github_secret_token:
+    inputs:
+      owner:
         required: true
-        description: "The GitHub token to authenticate API requests"
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: true
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+    secrets:
+      github_app_id:
+        required: true
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: true
+        description: "Private key for the GitHub App to generate a token"
 
 jobs:
-  release:
+  main:
     runs-on: ubuntu-latest
     steps:
       # Step to check out the code
       - name: Checkout Code
         uses: actions/checkout@v4
+
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: ${{ inputs.repositories }}
 
       # Step to set up Node.js
       - name: Set up Node.js
@@ -29,4 +51,4 @@ jobs:
       - name: Run semantic-release
         run: npx semantic-release
         env:
-          GITHUB_TOKEN: ${{ secrets.github_secret_token }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
