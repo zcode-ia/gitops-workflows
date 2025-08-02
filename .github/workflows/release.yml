@@ -2,27 +2,46 @@ name: Release
 
 on:
   workflow_call:
+    inputs:
+      owner:
+        required: true
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: true
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+    secrets:
+      github_app_id:
+        required: true
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: true
+        description: "Private key for the GitHub App to generate a token"
 
 jobs:
-  release:
+  main:
     runs-on: ubuntu-latest
     steps:
       # Step to check out the code
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        uses: actions/create-github-app-token@v2
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: ${{ inputs.repositories }}
+
       # Step to set up Node.js
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Generate GitHub App Token
-        uses: actions/create-github-app-token@v2
-        id: app-token
-        with:
-          app-id: ${{ secrets.CREATE_TOKEN_APP_ID }}
-          private-key: ${{ secrets.CREATE_TOKEN_PRIVATE_KEY }}
 
       # Step to install dependencies
       - name: Install dependencies
