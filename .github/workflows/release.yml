@@ -26,6 +26,9 @@ jobs:
       # Step to check out the code
       - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
 
       # Step to generate GitHub App token
       - name: Generate GitHub App Token
