@@ -6,6 +6,7 @@ Please, install the following dependencies before setup this repository
 
 * pre-commit
 * shellcheck-py
+* npm
 
 ## Repository setup
 Run the follow command to setup the repository

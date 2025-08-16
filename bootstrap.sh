@@ -1,12 +1,13 @@
 #!/bin/bash
 
-enable-pre-commit() {
-    if command -v pre-commit &> /dev/null; then
-        pre-commit install
-    else
-        echo "Error: pre-commit not found! Please, install it."
-        exit 1
-    fi
-}
+if [[ "$SKIP" == "enable_pre_commit" ]]; then
+    echo "Skipping pre-commit.."
+else
+    bash tools/enable_pre_commit.sh
+fi
 
-enable-pre-commit
+if [[ "$SKIP" == "install_npm_dependencies" ]]; then
+    echo "Skipping install-npm-dependencies.."
+else
+    bash tools/install_npm_dependencies.sh
+fi
