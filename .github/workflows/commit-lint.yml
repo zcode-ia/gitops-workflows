@@ -1,0 +1,52 @@
+name: Commit Lint
+
+on:
+  workflow_call:
+
+jobs:
+  commit-lint:
+    runs-on: ubuntu-latest
+    steps:
+      # Step to check out the code
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Step to set up Node.js
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      # Step to cache node modules
+      - name: Cache node modules
+        uses: actions/cache@v4
+        id: npm-cache
+        with:
+          path: ~/.npm
+          key: npm-${{ runner.os }}-${{ hashFiles('**/package-lock.json') }}
+          restore-keys: |
+            npm-${{ runner.os }}-
+
+      # Step to install dependencies
+      - name: Install dependencies
+        run: npm ci
+
+      # Step to run commitlint
+      - name: Lint PR commits
+        run: |
+          # Validate all commits from the base and head
+          BASE_SHA=${{ github.event.pull_request.base.sha }}
+          HEAD_SHA=${{ github.sha }}
+
+          COMMITS=$(git log $BASE_SHA..$HEAD_SHA --pretty=format:"%H")
+          echo "Linting commits:"
+          echo "$COMMITS"
+
+          echo "$COMMITS" | while read COMMIT; do
+            echo "Checking commit: $COMMIT"
+            npx commitlint --from $COMMIT^ --to $COMMIT
+          done

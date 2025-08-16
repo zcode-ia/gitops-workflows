@@ -5,19 +5,19 @@ on:
     inputs:
       owner:
         required: true
-        description: "Owner of the repository"
+        description: "Owner of the repository."
         type: string
       repositories:
         required: true
-        description: "Comma-separated list of repositories to generate tokens for"
+        description: "Comma-separated list of repositories to generate tokens for."
         type: string
     secrets:
       github_app_id:
         required: true
-        description: "GitHub App ID for token generation"
+        description: "GitHub App ID for token generation."
       github_app_private_key:
         required: true
-        description: "Private key for the GitHub App to generate a token"
+        description: "Private key for the GitHub App to generate a token."
 
 jobs:
   main:
