@@ -1,0 +1,11 @@
+name: Commit Lint
+
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  commit-lint:
+    name: Run Commit Lint
+    uses: zcode-ia/gitops-workflows/.github/workflows/commit-lint.yml@main
