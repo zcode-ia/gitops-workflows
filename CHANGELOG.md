@@ -1,3 +1,10 @@
+# [1.13.0](https://github.com/zcode-ia/gitops-workflows/compare/v1.12.0...v1.13.0) (2025-08-17)
+
+
+### Features
+
+* add github pr diff check ([62060fd](https://github.com/zcode-ia/gitops-workflows/commit/62060fd9d032652a8f4ed60a306c148fcc7eb8bd))
+
 # [1.12.0](https://github.com/zcode-ia/gitops-workflows/compare/v1.11.0...v1.12.0) (2025-08-17)
 
 
