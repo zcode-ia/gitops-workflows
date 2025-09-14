@@ -1,3 +1,17 @@
+# [1.14.0](https://github.com/zcode-ia/gitops-workflows/compare/v1.13.0...v1.14.0) (2025-09-14)
+
+
+### Bug Fixes
+
+* add missing required inputs ([05e3c25](https://github.com/zcode-ia/gitops-workflows/commit/05e3c25017278c51ff1688b84640002cb560bb15))
+* add missing required inputs ([265e31b](https://github.com/zcode-ia/gitops-workflows/commit/265e31b6b5b867f99da738582efc69c471f26e0a))
+* add missing required inputs ([c193724](https://github.com/zcode-ia/gitops-workflows/commit/c19372447e2932fd7dc46c409840eb6675243794))
+
+
+### Features
+
+* enable git submodule for tools ([97741cc](https://github.com/zcode-ia/gitops-workflows/commit/97741cc5347d3c955a32cce77eca4770526704fb))
+
 # [1.13.0](https://github.com/zcode-ia/gitops-workflows/compare/v1.12.0...v1.13.0) (2025-08-17)
 
 
