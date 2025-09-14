@@ -22,3 +22,8 @@ jobs:
     uses: ./.github/workflows/pre-commit.yml
     with:
       encoded_modified_files: ${{ needs.github_list_pr_files.outputs.encoded_modified_files }}
+      owner: ${{ github.repository_owner }}
+      repositories: ${{ github.event.repository.name }},gitops-tools-private
+    secrets:
+      github_app_id: ${{ secrets.CREATE_TOKEN_APP_ID }}
+      github_app_private_key: ${{ secrets.CREATE_TOKEN_APP_PRIVATE_KEY }}
