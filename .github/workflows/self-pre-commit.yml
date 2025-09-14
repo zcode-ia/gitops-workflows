@@ -8,7 +8,7 @@ on:
 jobs:
   github_list_pr_files:
     name: List Modified Files
-    uses: zcode-ia/gitops-workflows/.github/workflows/github-list-pr-files.yml@e6190ca441f297c5b5ec3794726ed20d08fded1d # v1.12.0
+    uses: ./.github/workflows/github-list-pr-files.yml
     with:
       github_repository: ${{ github.repository }}
       github_event_pull_request_number: ${{ github.event.pull_request.number }}
@@ -19,6 +19,11 @@ jobs:
     name: Run Pre-commit Hooks
     needs:
       - github_list_pr_files
-    uses: zcode-ia/gitops-workflows/.github/workflows/pre-commit.yml@e6190ca441f297c5b5ec3794726ed20d08fded1d # v1.12.0
+    uses: ./.github/workflows/pre-commit.yml
     with:
       encoded_modified_files: ${{ needs.github_list_pr_files.outputs.encoded_modified_files }}
+      owner: ${{ github.repository_owner }}
+      repositories: ${{ github.event.repository.name }}
+    secrets:
+      github_app_id: ${{ secrets.CREATE_TOKEN_APP_ID }}
+      github_app_private_key: ${{ secrets.CREATE_TOKEN_APP_PRIVATE_KEY }}

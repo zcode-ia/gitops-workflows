@@ -20,7 +20,21 @@ on:
         description: "GitHub event pull request number"
         required: true
         type: number
+      owner:
+        required: true
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: true
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
     secrets:
+      github_app_id:
+        required: true
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: true
+        description: "Private key for the GitHub App to generate a token"
       github_secret_token:
         required: true
         description: "The GitHub token to call modules from other repositories"
@@ -60,13 +74,27 @@ jobs:
           - 4566:4566
 
     steps:
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: ${{ inputs.repositories }}
+
       # Step to checkout the code
       - name: Checkout Code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+        with:
+          submodules: recursive
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
 
       # Caching Terraform and Terragrunt dependencies
       - name: Cache Terragrunt
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         with:
           path: ~/.cache/terragrunt/providers
           key: provider-cache-${{ runner.os }}-${{ hashFiles('**/aws.hcl') }}
@@ -75,14 +103,14 @@ jobs:
         run: |
           # Install necessary dependencies
 
-          sudo apt-get update
+          sudo apt-get update -y && \
           sudo apt-get install -y unzip direnv
 
       - name: Setup Repository
         run: |
           # Set up the repository
 
-          SKIP=enable_pre_commit ./bootstrap.sh # this script should be present in the caller repository
+          SKIP=enable_pre_commit,init_git_submodule ./bootstrap.sh # this script should be present in the caller repository
 
           # Extract the updated PATH and write it to GITHUB_ENV
           NEW_PATH=$(direnv exec . bash -c 'echo $PATH')
@@ -100,12 +128,12 @@ jobs:
         run: |
           # Generate a Terragrunt plan
 
-          # URL for the GitHub run ID
-          RUN_ID_URL="https://github.com/${INPUT_GITHUB_REPOSITORY}/actions/runs/${INPUT_GITHUB_RUN_ID}"
-
           # Ensure that the GITHUB_TOKEN is set for git operations
           AUTH_URL="https://x-access-token:${INPUT_GITHUB_TOKEN}@github.com/"
           git config --global url."${AUTH_URL}".insteadOf https://github.com/
+
+          # URL for the GitHub run ID
+          RUN_ID_URL="https://github.com/${INPUT_GITHUB_REPOSITORY}/actions/runs/${INPUT_GITHUB_RUN_ID}"
 
           # File to store the output
           TERRAGRUNT_RUNALL_OUTPUT_FILENAME=terragrunt_runall_output.txt
@@ -126,10 +154,10 @@ jobs:
               echo "Planning ${WORKING_DIR}..." >> "${ARTIFACT_PATH_FILENAME}"
 
               # Run Terragrunt init in the directory
-              terragrunt run-all init --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}"
+              terragrunt run-all init --non-interactive --no-color --working-dir "${WORKING_DIR}" --provider-cache
 
               # Run Terragrunt plan in the directory
-              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color --provider-cache --working-dir "${WORKING_DIR}" 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
+              terragrunt run-all plan --out=plan.tfplan --non-interactive --no-color --working-dir "${WORKING_DIR}" --provider-cache 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
 
               # Extract the plan header from the output
               PLAN_HEADER=$(awk '/The stack at/ {flag=1; print substr($0, index($0, "The stack at")); next} /Terraform used the selected providers to generate/ {flag=0} flag' "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}")
