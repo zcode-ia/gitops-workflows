@@ -1,3 +1,10 @@
+## [1.14.1](https://github.com/zcode-ia/gitops-workflows/compare/v1.14.0...v1.14.1) (2025-09-20)
+
+
+### Bug Fixes
+
+* add gitops-tools repository to be token-authorized ([650244e](https://github.com/zcode-ia/gitops-workflows/commit/650244e19571918a6dab007158e7023fe5f022eb))
+
 # [1.14.0](https://github.com/zcode-ia/gitops-workflows/compare/v1.13.0...v1.14.0) (2025-09-14)
 
 
