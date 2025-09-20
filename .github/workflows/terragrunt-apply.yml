@@ -78,7 +78,7 @@ jobs:
           app-id: ${{ secrets.github_app_id }}
           private-key: ${{ secrets.github_app_private_key }}
           owner: ${{ inputs.owner }}
-          repositories: ${{ inputs.repositories }}
+          repositories: "${{ inputs.repositories }}, gitops-tools"
 
       # Step to checkout the code
       - name: Checkout Code
