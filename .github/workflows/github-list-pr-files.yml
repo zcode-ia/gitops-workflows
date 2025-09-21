@@ -12,7 +12,26 @@ on:
         required: true
         type: number
         description: "The pull request number to list modified files for"
+      owner:
+        required: false
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: false
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+      skip_token_generation_for_tools_repository:
+        required: false
+        type: boolean
+        default: false
+        description: "Skip GitHub App token generation for specific repositories"
     secrets:
+      github_app_id:
+        required: false
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: false
+        description: "Private key for the GitHub App to generate a token"
       github_secret_token:
         required: true
         description: "The GitHub token to authenticate API requests"
@@ -30,67 +49,62 @@ jobs:
     name: main
     runs-on: ubuntu-latest
     steps:
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        if: ${{ !inputs.skip_token_generation_for_tools_repository }}
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: "${{ inputs.repositories }},gitops-tools"
+
       # Step to checkout the code
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        if: ${{ !inputs.skip_token_generation_for_tools_repository }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+        with:
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
 
+      # Step to check out the code without token
+      - name: Checkout Code
+        if: ${{ inputs.skip_token_generation_for_tools_repository }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+
+      # Step to list modified files in the pull request
       - name: List Modified Files
         id: list_modified_files
         env:
           INPUT_GITHUB_TOKEN: ${{ secrets.github_secret_token }}
           INPUT_GITHUB_REPOSITORY: ${{ inputs.github_repository }}
           INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER: ${{ inputs.github_event_pull_request_number }}
+          SKIP_TOKEN_GENERATION_FOR_TOOLS_REPOSITORY: ${{ inputs.skip_token_generation_for_tools_repository }}
         run: |
-          # File to store the modified files
-          API_RESPONSE_FILENAME=api_response.json
-          MODIFIED_FILES_FILENAME=modified_files.txt
-          > "${MODIFIED_FILES_FILENAME}"
+          # List modified files in the pull request using the custom script
 
-          page=1
-          per_page=100
+          WORKSPACE_DIR=$(git rev-parse --show-toplevel)
+          CI_DIR="${WORKSPACE_DIR}/tools/ci"
+          SHELL_OUTPUTS_FILE="shell_outputs.txt"
 
-          while :; do
-            # Use the GitHub API with pagination to fetch the list of modified files
-            STATUS_RESPONSE=$(curl -s -H "Authorization: Bearer ${INPUT_GITHUB_TOKEN}" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${INPUT_GITHUB_REPOSITORY}/pulls/${INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER}/files?per_page=$per_page&page=$page" \
-              -o ${API_RESPONSE_FILENAME} -w "%{http_code}")
-
-            if [[ "$STATUS_RESPONSE" =~ ^2 ]]; then
-              echo "Request succeeded with status: $STATUS_RESPONSE"
-            else
-              echo "Request failed with status: $STATUS_RESPONSE"
-              cat "$API_RESPONSE_FILENAME"
-              exit 1
-            fi
-
-            FILES_FOUND=$(cat "$API_RESPONSE_FILENAME" | jq -r '.[].filename')
-            if [ -z "$FILES_FOUND" ]; then
-              break
-            fi
-
-            # Show the modified files
-            echo "$FILES_FOUND" | tee -a $MODIFIED_FILES_FILENAME
-
-            # Check if less than per_page results returned (last page)
-            COUNT=$(echo "$FILES_FOUND" | wc -l)
-            if [ "$COUNT" -lt "$per_page" ]; then
-              break
-            fi
-            page=$((page+1))
-          done
-
-          # Check the filenames from the API response
-          if [ ! -s "$MODIFIED_FILES_FILENAME" ]; then
-            echo "- No filename found in the API response"
-            echo "pr_files_count=0" >> $GITHUB_OUTPUT
-            exit 0
+          if [[ "$SKIP_TOKEN_GENERATION_FOR_TOOLS_REPOSITORY" == "true" ]]; then
+            CI_DIR="${WORKSPACE_DIR}/ci"
           fi
 
-          # Set the modified files as an environment variable and convert to base64 to avoid issues with special characters and newlines
-          ENCODED_MODIFIED_FILES=$(cat ${MODIFIED_FILES_FILENAME} | base64 -w 0)
-          echo "encoded_modified_files=${ENCODED_MODIFIED_FILES}" >> $GITHUB_OUTPUT
-          echo "pr_files_count=$(wc -l < ${MODIFIED_FILES_FILENAME})" >> $GITHUB_OUTPUT
+          bash "${CI_DIR}"/github-list-pr-files.sh "${INPUT_GITHUB_TOKEN}" "${INPUT_GITHUB_REPOSITORY}" "${INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER}" | tee $SHELL_OUTPUTS_FILE
+
+          # capture the output of the script, filtering lines that start with #
+          SHELL_OUTPUTS=$(grep '^#' $SHELL_OUTPUTS_FILE)
+
+          # Print the captured output for debugging purposes, excluding the leading #
+          echo "SHELL_OUTPUTS=${SHELL_OUTPUTS:1}"
+
+          pr_files_count=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $1}')
+          encoded_modified_files=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $2}')
+
+          echo "pr_files_count=${pr_files_count}" >> $GITHUB_OUTPUT
+          echo "encoded_modified_files=${encoded_modified_files}" >> $GITHUB_OUTPUT
     outputs:
       encoded_modified_files: ${{ steps.list_modified_files.outputs.encoded_modified_files }}
       pr_files_count: ${{ steps.list_modified_files.outputs.pr_files_count }}

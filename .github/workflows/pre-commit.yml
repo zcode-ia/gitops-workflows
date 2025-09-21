@@ -9,19 +9,24 @@ on:
         type: string
         description: "The base64 encoded list of modified files to check"
       owner:
-        required: true
+        required: false
         description: "Owner of the repository"
         type: string
       repositories:
-        required: true
+        required: false
         description: "Comma-separated list of repositories to generate tokens for"
         type: string
+      skip_token_generation_for_tools_repository:
+        required: false
+        type: boolean
+        default: false
+        description: "Skip GitHub App token generation for specific repositories"
     secrets:
       github_app_id:
-        required: true
+        required: false
         description: "GitHub App ID for token generation"
       github_app_private_key:
-        required: true
+        required: false
         description: "Private key for the GitHub App to generate a token"
     outputs:
       # Define the output parameters for the workflow
@@ -37,22 +42,29 @@ jobs:
     steps:
       # Step to generate GitHub App token
       - name: Generate GitHub App Token
+        if: ${{ !inputs.skip_token_generation_for_tools_repository }}
         uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
         id: app-token
         with:
           app-id: ${{ secrets.github_app_id }}
           private-key: ${{ secrets.github_app_private_key }}
           owner: ${{ inputs.owner }}
-          repositories: "${{ inputs.repositories }}, gitops-tools"
+          repositories: ${{ inputs.repositories }}
 
       # Step to check out the code
       - name: Checkout Code
+        if: ${{ !inputs.skip_token_generation_for_tools_repository }}
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
         with:
           submodules: recursive
-          persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
+      # Step to check out the code without token
+      - name: Checkout Code
+        if: ${{ inputs.skip_token_generation_for_tools_repository }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+
+      # Step to install dependencies
       - name: Install dependencies
         run: |
           # Install necessary dependencies
@@ -65,12 +77,14 @@ jobs:
         with:
           python-version: "3.13"
 
+      # Step to install Pre-commit
       - name: Install Pre-commit
         run: |
           # Install Pre-commit and other dependencies
           python -m pip install --upgrade pip
           pip install pre-commit shellcheck-py
 
+      # Step to set up the repository
       - name: Setup Repository
         run: |
           # Setup the repository

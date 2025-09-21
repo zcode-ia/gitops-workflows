@@ -9,3 +9,9 @@ jobs:
   commit-lint:
     name: Run Commit Lint
     uses: ./.github/workflows/commit-lint.yml
+    with:
+      owner: ${{ github.repository_owner }}
+      repositories: ${{ github.event.repository.name }}
+    secrets:
+      github_app_id: ${{ secrets.CREATE_TOKEN_APP_ID }}
+      github_app_private_key: ${{ secrets.CREATE_TOKEN_APP_PRIVATE_KEY }}

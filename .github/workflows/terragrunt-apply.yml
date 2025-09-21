@@ -9,9 +9,9 @@ on:
         required: true
         type: string
       github_repository:
+        description: "The GitHub repository in the format 'owner/repo'"
         required: true
         type: string
-        description: "The GitHub repository in the format 'owner/repo'"
       github_run_id:
         description: "GitHub run ID"
         required: true
@@ -29,6 +29,7 @@ on:
         description: "Comma-separated list of repositories to generate tokens for"
         type: string
     secrets:
+      # Define the secrets required for the workflow
       github_app_id:
         required: true
         description: "GitHub App ID for token generation"
@@ -78,14 +79,13 @@ jobs:
           app-id: ${{ secrets.github_app_id }}
           private-key: ${{ secrets.github_app_private_key }}
           owner: ${{ inputs.owner }}
-          repositories: "${{ inputs.repositories }}, gitops-tools"
+          repositories: "${{ inputs.repositories }},gitops-tools"
 
       # Step to checkout the code
       - name: Checkout Code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
         with:
           submodules: recursive
-          persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
       # Caching Terraform and Terragrunt dependencies
@@ -95,6 +95,7 @@ jobs:
           path: ~/.cache/terragrunt/providers
           key: provider-cache-${{ runner.os }}-${{ hashFiles('**/aws.hcl') }}
 
+      # Step to install dependencies
       - name: Install Dependencies
         run: |
           # Install necessary dependencies
@@ -102,6 +103,7 @@ jobs:
           sudo apt-get update -y && \
           sudo apt-get install -y unzip direnv
 
+      # Step to setup the repository
       - name: Setup Repository
         run: |
           # Set up the repository
@@ -112,6 +114,7 @@ jobs:
           NEW_PATH=$(direnv exec . bash -c 'echo $PATH')
           echo "PATH=$NEW_PATH" >> $GITHUB_ENV
 
+      # Step to run Terragrunt apply
       - name: Terragrunt Apply
         id: main
         env:
@@ -123,111 +126,34 @@ jobs:
         run: |
           # Run Terragrunt apply
 
-          # Ensure that the GITHUB_TOKEN is set for git operations
-          AUTH_URL="https://x-access-token:${INPUT_GITHUB_TOKEN}@github.com/"
-          git config --global url."${AUTH_URL}".insteadOf https://github.com/
+          WORKSPACE_DIR=$(git rev-parse --show-toplevel)
+          CI_DIR="${WORKSPACE_DIR}/tools/ci"
+          SHELL_OUTPUTS_FILE="shell_outputs.txt"
 
-          # URL for the GitHub run ID
-          RUN_ID_URL="https://github.com/${INPUT_GITHUB_REPOSITORY}/actions/runs/${INPUT_GITHUB_RUN_ID}"
+          bash "${CI_DIR}"/terragrunt-apply.sh "${ENCODED_WORKING_DIRS}" "${INPUT_GITHUB_REPOSITORY}" "${INPUT_GITHUB_RUN_ID}" "${INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER}" "${INPUT_GITHUB_TOKEN}" | tee $SHELL_OUTPUTS_FILE
 
-          # File to store the output
-          TERRAGRUNT_RUNALL_OUTPUT_FILENAME=terragrunt_runall_output.txt
-          ARTIFACT_PATH_FILENAME="${GITHUB_WORKSPACE}/${INPUT_GITHUB_EVENT_PULL_REQUEST_NUMBER}-${INPUT_GITHUB_RUN_ID}-output.txt"
+          # capture the output of the script, filtering lines that start with #
+          SHELL_OUTPUTS=$(grep '^#' $SHELL_OUTPUTS_FILE)
 
-          # Initialize variables to store title and all apply outputs
-          COMMENT_TITLE="## Apply result\n\n"
-          COMMENT_OUTPUTS="Show apply for the following directories:\n\n"
-          COMMENT_OUTPUTS_MAX_LENGTH=65000
+          # Print the captured output for debugging purposes, excluding the leading #
+          echo "SHELL_OUTPUTS=${SHELL_OUTPUTS:1}"
 
-          # Decode the base64 encoded working directories
-          for WORKING_DIR in $(echo "${ENCODED_WORKING_DIRS}" | base64 -d); do
-            # Check if the working directory exists
-            if [ -d "${WORKING_DIR}" ]; then
-              # Adding the directory name to the output
-              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}<details><summary>${WORKING_DIR}</summary>\n"
+          comment_status=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $1}')
+          encoded_comment_title=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $2}')
+          encoded_comment_outputs=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $3}')
+          artifact_path_filename=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $4}')
 
-              # Run Terragrunt init in the directory
-              terragrunt run-all init --non-interactive --no-color --working-dir "${WORKING_DIR}" --provider-cache
-
-              # Run Terragrunt apply in the directory
-              terragrunt run-all apply --non-interactive --no-color --working-dir "${WORKING_DIR}" --provider-cache 2>&1 | tee "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"
-
-              echo >> "${ARTIFACT_PATH_FILENAME}"
-              # Extract the apply header from the output
-              cat "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}" | sed -E 's/^.*(The stack at .*)/\1/' | sed -E 's/^.*\[(.*)\].*terraform:\s?/\[\1\] : /' >> "${ARTIFACT_PATH_FILENAME}"
-
-              APPLY_OUTPUT=$(cat "${ARTIFACT_PATH_FILENAME}")
-              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n\n<pre>${APPLY_OUTPUT}</pre>\n</details>"
-              echo
-            else
-              echo "Directory ${WORKING_DIR} does not exist."
-            fi
-          done
-
-          if [ ! -f ${TERRAGRUNT_RUNALL_OUTPUT_FILENAME} ]; then
-            # Set variables to warning no plan was generated
-            COMMENT_TITLE="## Apply result\n\n"
-            COMMENT_OUTPUTS="No apply was performed. Check pipeline logs for more details. [${INPUT_GITHUB_RUN_ID}](${RUN_ID_URL})\n\n"
-            echo "comment_status=pass" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Convert to base64 to avoid issues with special characters and newlines
-          ENCODED_COMMENT_TITLE=$(echo -e "$COMMENT_TITLE" | jq -Rsa . | base64 -w 0)
-          echo "encoded_comment_title=${ENCODED_COMMENT_TITLE}" >> $GITHUB_OUTPUT
-
-          if [[ ${#COMMENT_OUTPUTS} -gt ${COMMENT_OUTPUTS_MAX_LENGTH} ]]; then
-            echo "Comment output exceeds ${COMMENT_OUTPUTS_MAX_LENGTH} characters, the artifact file will be uploaded..."
-            # Grouping the prefix and ordering the output file
-             awk '
-              /^\[[^]]+\]/ {
-                prefix = substr($0, 1, index($0, "]"))
-                gsub(/^[[:space:]]+|[[:space:]]+$/, "", prefix)
-                if (!(prefix in seen)) {
-                  seen[prefix] = 1
-                  order[++count] = prefix
-                }
-                data[prefix] = data[prefix] $0 "\n"
-              }
-              END {
-                for (i = 1; i <= count; i++) {
-                  pf = order[i]
-                  print "### " pf
-                  printf "%s", data[pf]
-                  print ""
-                }
-              }
-            ' "${ARTIFACT_PATH_FILENAME}" > "${ARTIFACT_PATH_FILENAME}.ordered"
-            cp -f "${ARTIFACT_PATH_FILENAME}.ordered" "${ARTIFACT_PATH_FILENAME}"
-            echo "artifact_path_filename=${ARTIFACT_PATH_FILENAME}" >> $GITHUB_OUTPUT
-            COMMENT_OUTPUTS="Content too long for github comments."
-            ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
-            echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
-            echo "comment_status=fallback" >> $GITHUB_OUTPUT
-            exit 0
-          fi
-
-          # Escape the content of COMMENT_OUTPUTS for JSON and convert to base64 to avoid issues with special characters and newlines
-          ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
-          echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
-
-          echo "comment_status=pass" >> $GITHUB_OUTPUT
-
-          # Search for Error message in the output file
-          if grep -q "STDERR" "${TERRAGRUNT_RUNALL_OUTPUT_FILENAME}"; then
-            COMMENT_OUTPUTS="The pipeline has failed! Check the logs for more details. [${INPUT_GITHUB_RUN_ID}](${RUN_ID_URL})\n\n"
-            ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
-            echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
-            echo "comment_status=fallback" >> $GITHUB_OUTPUT
-            echo "Error found in the output, failing the job..."
-            exit 1
-          fi
+          echo "comment_status=${comment_status}" >> $GITHUB_OUTPUT
+          echo "encoded_comment_title=${encoded_comment_title}" >> $GITHUB_OUTPUT
+          echo "encoded_comment_outputs=${encoded_comment_outputs}" >> $GITHUB_OUTPUT
+          echo "artifact_path_filename=${artifact_path_filename}" >> $GITHUB_OUTPUT
         # to ensure comment postage even if this step fails
         continue-on-error: true
 
+      # Step to upload comment contents if fallback is needed
       - name: Upload Comment Contents
         id: upload_comment
-        if: steps.main.outcome == 'success' && steps.main.outputs.comment_status == 'fallback'
+        if: steps.main.outputs.comment_status == 'fallback' && steps.main.outputs.artifact_path_filename != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           path: ${{ steps.main.outputs.artifact_path_filename }}

@@ -2,20 +2,63 @@ name: Commit Lint
 
 on:
   workflow_call:
+    inputs:
+      # Define the input parameters for the workflow
+      owner:
+        required: false
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: false
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+      skip_token_generation_for_tools_repository:
+        required: false
+        type: boolean
+        default: false
+        description: "Skip GitHub App token generation for specific repositories"
+    secrets:
+      github_app_id:
+        required: false
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: false
+        description: "Private key for the GitHub App to generate a token"
 
 jobs:
   commit-lint:
     runs-on: ubuntu-latest
     steps:
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        if: ${{ !inputs.skip_token_generation_for_tools_repository }}
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: "${{ inputs.repositories }},gitops-tools"
+
       # Step to check out the code
       - name: Checkout Code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        if: ${{ !inputs.skip_token_generation_for_tools_repository }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
+
+      # Step to check out the code without token
+      - name: Checkout Code
+        if: ${{ inputs.skip_token_generation_for_tools_repository }}
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
         with:
           fetch-depth: 0
 
       # Step to set up Node.js
       - name: Set up Node.js
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.0.3
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
           cache: 'npm'
@@ -23,7 +66,7 @@ jobs:
 
       # Step to cache node modules
       - name: Cache node modules
-        uses: actions/cache@0400d5f644dc74513175e3cd8d07132dd4860809 # v4.2.4
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         id: npm-cache
         with:
           path: ~/.npm
@@ -37,16 +80,17 @@ jobs:
 
       # Step to run commitlint
       - name: Lint PR commits
+        env:
+          INPUT_GITHUB_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          INPUT_GITHUB_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          SKIP_TOKEN_GENERATION_FOR_TOOLS_REPOSITORY: ${{ inputs.skip_token_generation_for_tools_repository }}
         run: |
           # Validate all commits from the base and head
-          BASE_SHA=${{ github.event.pull_request.base.sha }}
-          HEAD_SHA=${{ github.sha }}
+          WORKSPACE_DIR=$(git rev-parse --show-toplevel)
+          CI_DIR="${WORKSPACE_DIR}/tools/ci"
 
-          COMMITS=$(git log $BASE_SHA..$HEAD_SHA --pretty=format:"%H")
-          echo "Linting commits:"
-          echo "$COMMITS"
+          if [[ "$SKIP_TOKEN_GENERATION_FOR_TOOLS_REPOSITORY" == "true" ]]; then
+            CI_DIR="${WORKSPACE_DIR}/ci"
+          fi
 
-          echo "$COMMITS" | while read COMMIT; do
-            echo "Checking commit: $COMMIT"
-            npx commitlint --from $COMMIT^ --to $COMMIT
-          done
+          bash "${CI_DIR}"/commit-lint.sh "${INPUT_GITHUB_BASE_SHA}" "${INPUT_GITHUB_HEAD_SHA}"

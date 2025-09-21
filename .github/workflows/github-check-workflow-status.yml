@@ -8,25 +8,52 @@ on:
         description: 'The outcome of the main job'
         type: string
         default: 'success'
+      owner:
+        required: true
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: true
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+    secrets:
+      github_app_id:
+        required: true
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: true
+        description: "Private key for the GitHub App to generate a token"
 
 jobs:
   check_workflow_status:
     name: main
     runs-on: ubuntu-latest
     steps:
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: "${{ inputs.repositories }},gitops-tools"
+
       # Step to checkout the code
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+        with:
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
 
+      # Step to check the workflow status
       - name: Check Workflow Status
         env:
           STEP_MAIN_OUTCOME: ${{ inputs.main_outcome }}
         run: |
           # Check the workflow status
 
-          if [[ "${STEP_MAIN_OUTCOME}" == "success" ]]; then
-            echo "The workflow completed successfully."
-          else
-            echo "The workflow failed. Please check the logs for details."
-            exit 1
-          fi
+          WORKSPACE_DIR=$(git rev-parse --show-toplevel)
+          CI_DIR="${WORKSPACE_DIR}/tools/ci"
+
+          bash "${CI_DIR}"/github-check-workflow-status.sh "${STEP_MAIN_OUTCOME}"
