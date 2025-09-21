@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/zcode-ia/gitops-workflows/compare/v1.14.1...v1.15.0) (2025-09-21)
+
+
+### Features
+
+* use ci scripts from tools ([88d9294](https://github.com/zcode-ia/gitops-workflows/commit/88d9294d5eabbf025012b502c6fd94caa429b1dd))
+
 ## [1.14.1](https://github.com/zcode-ia/gitops-workflows/compare/v1.14.0...v1.14.1) (2025-09-20)
 
 
