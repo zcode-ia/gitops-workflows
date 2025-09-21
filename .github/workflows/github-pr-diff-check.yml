@@ -16,6 +16,21 @@ on:
         description: "Comma-separated list of branches to check against (e.g., dev,qa,staging)"
         required: true
         type: string
+      owner:
+        required: true
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: true
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+    secrets:
+      github_app_id:
+        required: true
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: true
+        description: "Private key for the GitHub App to generate a token"
     outputs:
       # Define the output parameters for the workflow
       encoded_comment_title:
@@ -33,11 +48,25 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: "${{ inputs.repositories }},gitops-tools"
+
+      # Step to checkout the code
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
         with:
           fetch-depth: 0
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
 
+      # Step to run the commit ancestry check
       - name: Run commit ancestry check
         id: main
         env:
@@ -45,48 +74,25 @@ jobs:
           INPUT_GITHUB_BASE_BRANCH: ${{ inputs.github_base_ref }}
           INPUT_GITHUB_HEAD_BRANCH: ${{ inputs.github_head_ref }}
         run: |
-          IFS=',' read -ra BRANCHES <<< "$COMPARISON_BRANCHES"
+          # Check if all commits from the PR branch are present in the specified branches
 
-          cd "$GITHUB_WORKSPACE"
-          git fetch origin "$INPUT_GITHUB_BASE_BRANCH"
-          git fetch origin "$INPUT_GITHUB_HEAD_BRANCH"
+          WORKSPACE_DIR=$(git rev-parse --show-toplevel)
+          CI_DIR="${WORKSPACE_DIR}/tools/ci"
+          SHELL_OUTPUTS_FILE="shell_outputs.txt"
 
-          COMMENT_TITLE="## Commit Ancestry Check\n\n"
-          COMMENT_OUTPUTS=""
-          ALL_BRANCHES_MISSING=true
+          bash "${CI_DIR}"/github-pr-diff-check.sh "${COMPARISON_BRANCHES}" "${INPUT_GITHUB_BASE_BRANCH}" "${INPUT_GITHUB_HEAD_BRANCH}" | tee $SHELL_OUTPUTS_FILE
 
-          for BRANCH in "${BRANCHES[@]}"; do
-            echo "Checking branch: $BRANCH"
-            git fetch origin "$BRANCH"
+          # capture the output of the script, filtering lines that start with #
+          SHELL_OUTPUTS=$(grep '^#' $SHELL_OUTPUTS_FILE)
 
-            UNMERGED_COMMITS=$(git cherry origin/"$BRANCH" origin/"$INPUT_GITHUB_HEAD_BRANCH" | grep '^+' | cut -c3- || true)
+          # Print the captured output for debugging purposes, excluding the leading #
+          echo "SHELL_OUTPUTS=${SHELL_OUTPUTS:1}"
 
-            if [ -n "$UNMERGED_COMMITS" ]; then
-              echo "PR contains commits not found in $BRANCH"
-              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}- Branch ${BRANCH} [\`Commits Missing\`]\n"
+          encoded_comment_title=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $1}')
+          encoded_comment_outputs=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $2}')
 
-              for COMMIT in $UNMERGED_COMMITS; do
-                COMMIT_MSG=$(git log --format="%h %s" -n 1 "$COMMIT")
-                COMMENT_OUTPUTS="${COMMENT_OUTPUTS}  - ${COMMIT_MSG}\n"
-              done
-
-              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}\n"
-            else
-              echo "All PR commits are present in $BRANCH"
-              COMMENT_OUTPUTS="${COMMENT_OUTPUTS}- Branch ${BRANCH} [\`All Commits Present\`]\n\n"
-              ALL_BRANCHES_MISSING=false
-            fi
-          done
-
-          ENCODED_COMMENT_TITLE=$(echo -e "${COMMENT_TITLE}" | jq -Rsa . | base64 -w 0)
-          echo "encoded_comment_title=${ENCODED_COMMENT_TITLE}" >> $GITHUB_OUTPUT
-
-          ENCODED_COMMENT_OUTPUTS=$(echo -e "$COMMENT_OUTPUTS" | jq -Rsa . | base64 -w 0)
-          echo "encoded_comment_outputs=${ENCODED_COMMENT_OUTPUTS}" >> $GITHUB_OUTPUT
-
-          if [ "$ALL_BRANCHES_MISSING" = true ]; then
-            exit 1
-          fi
+          echo "encoded_comment_title=${encoded_comment_title}" >> $GITHUB_OUTPUT
+          echo "encoded_comment_outputs=${encoded_comment_outputs}" >> $GITHUB_OUTPUT
     outputs:
       encoded_comment_title: ${{ steps.main.outputs.encoded_comment_title }}
       encoded_comment_outputs: ${{ steps.main.outputs.encoded_comment_outputs }}

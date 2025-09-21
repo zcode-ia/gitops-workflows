@@ -8,6 +8,22 @@ on:
         required: true
         type: string
         description: The base branch of the pull request.
+      owner:
+        required: true
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: true
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+    secrets:
+      # Define the secrets required for the workflow
+      github_app_id:
+        required: true
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: true
+        description: "Private key for the GitHub App to generate a token"
     outputs:
       # Define the output parameters for the workflow
       working_dir:
@@ -19,10 +35,24 @@ jobs:
     name: main
     runs-on: ubuntu-latest
     steps:
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: "${{ inputs.repositories }},gitops-tools"
+
       # Step to checkout the code
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+        with:
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
 
+      # Step to set the environment
       - name: Set Environment
         id: set_env
         env:
@@ -30,13 +60,20 @@ jobs:
         run: |
           # Determine the environment settings
 
-          # Set the working directory based on the base branch
-          if [[ "$INPUT_GITHUB_BASE_REF" == "main" ]]; then
-            WORKING_DIR=live/prod
-          else
-            WORKING_DIR=live/$INPUT_GITHUB_BASE_REF
-          fi
-          echo "${WORKING_DIR}"
-          echo "working_dir=${WORKING_DIR}" >> $GITHUB_OUTPUT
+          WORKSPACE_DIR=$(git rev-parse --show-toplevel)
+          CI_DIR="${WORKSPACE_DIR}/tools/ci"
+          SHELL_OUTPUTS_FILE="shell_outputs.txt"
+
+          bash "${CI_DIR}"/terragrunt-set-environment.sh "${INPUT_GITHUB_BASE_REF}" | tee $SHELL_OUTPUTS_FILE
+
+          # capture the output of the script, filtering lines that start with #
+          SHELL_OUTPUTS=$(grep '^#' $SHELL_OUTPUTS_FILE)
+
+          # Print the captured output for debugging purposes, excluding the leading #
+          echo "SHELL_OUTPUTS=${SHELL_OUTPUTS:1}"
+
+          working_dir=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $1}')
+
+          echo "working_dir=${working_dir}" >> $GITHUB_OUTPUT
     outputs:
       working_dir: ${{ steps.set_env.outputs.working_dir }}

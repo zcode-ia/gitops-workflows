@@ -12,6 +12,21 @@ on:
         required: true
         type: string
         description: "The base64 encoded list of modified files to filter"
+      owner:
+        required: true
+        description: "Owner of the repository"
+        type: string
+      repositories:
+        required: true
+        description: "Comma-separated list of repositories to generate tokens for"
+        type: string
+    secrets:
+      github_app_id:
+        required: true
+        description: "GitHub App ID for token generation"
+      github_app_private_key:
+        required: true
+        description: "Private key for the GitHub App to generate a token"
     outputs:
       # Define the output parameters for the workflow
       working_dirs_count:
@@ -26,9 +41,22 @@ jobs:
     name: main
     runs-on: ubuntu-latest
     steps:
+      # Step to generate GitHub App token
+      - name: Generate GitHub App Token
+        uses: actions/create-github-app-token@df432ceedc7162793a195dd1713ff69aefc7379e # v2.0.6
+        id: app-token
+        with:
+          app-id: ${{ secrets.github_app_id }}
+          private-key: ${{ secrets.github_app_private_key }}
+          owner: ${{ inputs.owner }}
+          repositories: "${{ inputs.repositories }},gitops-tools"
+
       # Step to checkout the code
       - name: Checkout code
-        uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.4.2
+        with:
+          submodules: recursive
+          token: ${{ steps.app-token.outputs.token }}
 
       - name: Filter Modified Files
         id: filter_modified_files
@@ -38,61 +66,23 @@ jobs:
         run: |
           # Filter modified files by environment working directory
 
-          # File to store the filtered directories of modified files
-          FILTERED_WORKING_DIRS_FILENAME=filtered_working_dirs.txt
+          WORKSPACE_DIR=$(git rev-parse --show-toplevel)
+          CI_DIR="${WORKSPACE_DIR}/tools/ci"
+          SHELL_OUTPUTS_FILE="shell_outputs.txt"
 
-          # Decode the base64 encoded MODIFIED_FILES and extract the parent folder
-          echo "${ENCODED_MODIFIED_FILES_TO_FILTER}" | base64 -d | grep "${FILTER}" | sed -E 's|/[^/]+/[^/]+$||' | sort -u | tee ${FILTERED_WORKING_DIRS_FILENAME}
+          bash "${CI_DIR}"/terragrunt-filter-working-dir.sh "${FILTER}" "${ENCODED_MODIFIED_FILES_TO_FILTER}" | tee $SHELL_OUTPUTS_FILE
 
-          # Check if the parent directory is empty
-          if [ ! -s ${FILTERED_WORKING_DIRS_FILENAME} ]; then
-            echo "No modified files found in the working directory."
-            FILTERED_WORKING_DIRS_COUNT=0
-            exit 0
-          fi
+          # capture the output of the script, filtering lines that start with #
+          SHELL_OUTPUTS=$(grep '^#' $SHELL_OUTPUTS_FILE)
 
-          # Remove any directory that is a subdirectory of another in the list (keep only shallowest parents)
-          mapfile -t dirs < "${FILTERED_WORKING_DIRS_FILENAME}"
+          # Print the captured output for debugging purposes, excluding the leading #
+          echo "SHELL_OUTPUTS=${SHELL_OUTPUTS:1}"
 
-          # Only keep paths that are NOT exactly 'live' or match the FILTER
-          filtered_dirs=()
-          for dir in "${dirs[@]}"; do
-            [[ "$dir" == "live" || "$dir" == "${FILTER}" ]] && continue
-            filtered_dirs+=("$dir")
-          done
+          working_dirs_count=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $1}')
+          encoded_working_dirs=$(echo "${SHELL_OUTPUTS:1}" | awk -F '|' '{print $2}')
 
-          unique_dirs=()
-          for dir in "${filtered_dirs[@]}"; do
-            skip=
-            for other in "${filtered_dirs[@]}"; do
-              if [[ "$dir" != "$other" && "$dir" == "$other/"* ]]; then
-                skip=1
-                break
-              fi
-            done
-            [[ -z "$skip" ]] && unique_dirs+=("$dir")
-          done
-
-          if [ "${#unique_dirs[@]}" -eq 0 ]; then
-            echo "No working directories found after filtering."
-            FILTERED_WORKING_DIRS_COUNT=0
-            exit 0
-          fi
-
-          echo "Final filtered working directories:"
-          for dir in "${unique_dirs[@]}"; do
-            echo "$dir"
-          done
-
-          # Count the working directories to be processed
-          FILTERED_WORKING_DIRS_COUNT=${#unique_dirs[@]}
-          echo "Found ${FILTERED_WORKING_DIRS_COUNT} directory(ies) to be processed in ${FILTER}."
-
-          # Set the working directories and convert to base64 to avoid issues with special characters and newlines
-          ENCODED_FILTERED_WORKING_DIRS=$(printf "%s\n" "${unique_dirs[@]}" | base64 -w 0)
-
-          echo "working_dirs_count=${FILTERED_WORKING_DIRS_COUNT}" >> $GITHUB_OUTPUT
-          echo "encoded_working_dirs=${ENCODED_FILTERED_WORKING_DIRS}" >> $GITHUB_OUTPUT
+          echo "working_dirs_count=${working_dirs_count}" >> $GITHUB_OUTPUT
+          echo "encoded_working_dirs=${encoded_working_dirs}" >> $GITHUB_OUTPUT
     outputs:
       working_dirs_count: ${{ steps.filter_modified_files.outputs.working_dirs_count }}
       encoded_working_dirs: ${{ steps.filter_modified_files.outputs.encoded_working_dirs }}
